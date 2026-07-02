@@ -1,6 +1,6 @@
 # EduGrade 🎓
 
-**EduGrade** is an academic answer-sheet evaluation platform that automates grading using OCR and AI. It supports role-based workflows for **students**, **teachers**, and **admins**: exam scheduling, file-based answer submission, hybrid OCR handwritten-text extraction, and AI-powered grading via **Claude**.
+**EduGrade** is an academic answer-sheet evaluation platform that automates grading using OCR and AI. It supports role-based workflows for **students**, **teachers**, and **admins**: exam scheduling, file-based answer submission, hybrid OCR handwritten-text extraction, and AI-powered grading via **Groq (Llama 3.3)**.
 
 ---
 
@@ -9,8 +9,8 @@
 - **Role-based dashboards** — Three portals: Admin, Teacher, Student
 - **Smart exam scheduling** — Set scheduled and deadline times, auto-status (upcoming / open / closed)
 - **File submission** — Upload images or PDFs (drag-and-drop on client), up to 10 MB
-- **Hybrid OCR pipeline** — Microsoft TrOCR (handwriting) + OpenCV preprocessing (deskew, denoise, segmentation)
-- **AI grading** — Claude API grades answers against a teacher-provided answer key (or auto-generates one)
+- **Hybrid OCR pipeline** — Doctr (deep learning, primary) + Tesseract (fallback) + OpenCV preprocessing (deskew, denoise, thresholding)
+- **AI grading** — Groq API (Llama 3.3 70B) grades answers against a teacher-provided answer key (or auto-generates one)
 - **Detailed feedback** — Score, grade letter, matched/missed key points, constructive feedback
 - **Analytics** — Per-student score trends, improvement tracking, class-wide averages
 - **Rate-limited API** — 100 requests per 15 minutes per IP
@@ -49,7 +49,7 @@ npm --prefix client install
 ```bash
 # Server
 cp server/.env.example server/.env
-# Edit server/.env with your own values (database creds, Anthropic API key, etc.)
+# Edit server/.env with your own values (database creds, Groq API key, etc.)
 
 # Client
 cp client/.env.example client/.env
@@ -61,7 +61,7 @@ Key variables in `server/.env`:
 |----------|-------------|---------|
 | `DATABASE_URL` | PostgreSQL connection string | `postgres://postgres:postgres@localhost:5432/edugrade` |
 | `JWT_SECRET` | Secret key for signing JWT tokens | *required — change in production* |
-| `ANTHROPIC_API_KEY` | API key for Claude AI grading | *required for grading* |
+| `GROQ_API_KEY` | API key for Groq AI grading | *required for grading* |
 | `OCR_SERVICE_URL` | URL of the OCR microservice | `http://localhost:8001` |
 | `CLIENT_ORIGIN` | Allowed CORS origin | `http://localhost:5173` |
 
@@ -93,7 +93,7 @@ pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8001
 ```
 
-> **Note:** The OCR service needs about 4 GB of RAM to load the TrOCR model. On first run it downloads `microsoft/trocr-large-handwritten` (~1.5 GB).
+> **Note:** The OCR service uses Doctr (deep learning) as the primary engine, with Tesseract as a fallback for low-confidence results.
 
 ### 5. Start the application
 
@@ -127,14 +127,14 @@ Then open **http://localhost:5173** and log in with:
 ### Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine + Compose)
-- 8 GB+ RAM allocated to Docker (the OCR service loads a large model)
-- An Anthropic API key for AI grading
+- 4 GB+ RAM allocated to Docker
+- A Groq API key for AI grading (free tier available)
 
 ### Start everything
 
 ```bash
-# Set your Anthropic API key as an environment variable
-export ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxxx
+# Set your Groq API key as an environment variable
+export GROQ_API_KEY=gsk_xxxxxxxxxxxxx
 
 # Start all services in the background
 docker compose up --build -d
@@ -149,7 +149,7 @@ This starts five services:
 |---------|------|-------------|
 | `postgres` | 5432 | PostgreSQL 15 database |
 | `redis` | 6379 | Redis 7 (optional, for future job queue) |
-| `ocr_service` | 8001 | Python FastAPI OCR microservice |
+| `ocr_service` | 8001 | Python FastAPI OCR microservice (Doctr + Tesseract) |
 | `server` | 5000 | Node.js Express backend |
 | `client` | 3000 | React frontend (served by Nginx) |
 
@@ -207,7 +207,7 @@ edugrade/
 │
 ├── ocr_service/                    # Python FastAPI OCR microservice
 │   ├── main.py                     # FastAPI app (POST /extract, GET /health)
-│   ├── pipeline.py                 # Hybrid OCR pipeline (OpenCV + TrOCR)
+│   ├── pipeline.py                 # Hybrid OCR pipeline (OpenCV + Doctr + Tesseract fallback)
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── README.md
@@ -220,7 +220,7 @@ edugrade/
 │   │   ├── teacher.js              # Class/exam CRUD, grading trigger
 │   │   └── student.js              # Exam listing, file submission, results, analytics
 │   ├── services/
-│   │   └── grader.js               # OCR + Claude grading engine
+│   │   └── grader.js               # OCR + Groq grading engine
 │   ├── middleware/
 │   │   └── auth.js                 # JWT verification + role guard
 │   ├── db/
@@ -347,7 +347,7 @@ cd server
 railway up
 
 # 3. Set environment variables in Railway dashboard:
-#    DATABASE_URL, JWT_SECRET, ANTHROPIC_API_KEY, OCR_SERVICE_URL, CLIENT_ORIGIN
+#    DATABASE_URL, JWT_SECRET, GROQ_API_KEY, OCR_SERVICE_URL, CLIENT_ORIGIN
 ```
 
 ### OCR Service → Railway (separate service)
@@ -367,9 +367,9 @@ railway up
 3. Copy the URI connection string
 4. Set `DATABASE_URL` and `PGSSL=true` in your server's environment
 5. Run schema.sql against the Supabase database:
-   ```bash
+```bash
    psql "$SUPABASE_CONNECTION_STRING" -f server/db/schema.sql
-   ```
+```
 
 ---
 
@@ -381,9 +381,8 @@ railway up
 | `password authentication failed for user "postgres"` | Wrong password in `.env` | Set `PGPASSWORD` in `server/.env` to match your PostgreSQL install password |
 | `ECONNREFUSED :8001` | OCR service not running | Start OCR service: `cd ocr_service && uvicorn main:app --port 8001` |
 | `429 Too Many Requests` | Rate limit exceeded | Wait 15 minutes or increase `max` in `server/index.js` |
-| Grading returns `score: null` | OCR service not reachable or Claude API key missing | Check `OCR_SERVICE_URL` and `ANTHROPIC_API_KEY` in `server/.env` |
+| Grading returns `score: null` | OCR service not reachable or Groq API key missing | Check `OCR_SERVICE_URL` and `GROQ_API_KEY` in `server/.env` |
 | `JWT_SECRET is not set` warning | Missing `JWT_SECRET` in `.env` | Add a long random string to `server/.env` |
-| TrOCR model download fails | Insufficient disk space or network | Ensure 2 GB+ free space; check internet connection |
-| Docker build fails for `ocr_service` | Out of memory | Increase Docker memory to 8 GB+ in Docker Desktop settings |
+| Doctr model download fails | Insufficient disk space or network | Ensure 2 GB+ free space; check internet connection |
+| Docker build fails for `ocr_service` | Out of memory | Increase Docker memory to 4 GB+ in Docker Desktop settings |
 | `npm install` installs to wrong directory | Running from wrong folder | Ensure you're in `edugrade/` (contains root `package.json`) |
-
