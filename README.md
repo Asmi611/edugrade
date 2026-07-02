@@ -387,8 +387,3 @@ railway up
 | Docker build fails for `ocr_service` | Out of memory | Increase Docker memory to 8 GB+ in Docker Desktop settings |
 | `npm install` installs to wrong directory | Running from wrong folder | Ensure you're in `edugrade/` (contains root `package.json`) |
 
----
-
-## License
-
-MIT
