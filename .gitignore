@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+build/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Uploads (server)
+server/uploads/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Windows junk files
+nul

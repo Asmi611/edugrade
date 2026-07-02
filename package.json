@@ -1,0 +1,19 @@
+{
+  "name": "edugrade",
+  "private": true,
+  "version": "1.0.0",
+  "description": "EduGrade monorepo — academic answer-sheet evaluation platform (client + server).",
+  "scripts": {
+    "install:all": "npm --prefix server install && npm --prefix client install",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "dev": "concurrently -n server,client -c blue,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "start": "concurrently -n server,client -c blue,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "build": "npm --prefix client run build",
+    "db:init": "npm --prefix server run db:init",
+    "db:seed": "npm --prefix server run db:seed"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

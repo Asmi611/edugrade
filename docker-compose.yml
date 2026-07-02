@@ -1,0 +1,117 @@
+# =============================================================================
+# EduGrade — Docker Compose
+# =============================================================================
+# Starts all services for the EduGrade platform:
+#   - postgres    (database)
+#   - redis       (cache / job queue — optional)
+#   - ocr_service (Python FastAPI OCR microservice)
+#   - server      (Node.js Express backend)
+#   - client      (React frontend served via Nginx)
+#
+# Usage:
+#   docker compose up --build -d          # start all services
+#   docker compose logs -f server client  # watch server + client logs
+#   docker compose down                   # stop everything
+# =============================================================================
+
+services:
+  # ---- Database -----------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: edugrade-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: edugrade
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- Redis (optional — for future job queue) ----------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: edugrade-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ---- OCR Service --------------------------------------------------------
+  ocr_service:
+    build:
+      context: ./ocr_service
+      dockerfile: Dockerfile
+    container_name: edugrade-ocr
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - OCR_SERVICE_URL=http://0.0.0.0:8001
+    # GPU support (uncomment if nvidia-container-toolkit is installed):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # ---- Server -------------------------------------------------------------
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: edugrade-server
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ocr_service:
+        condition: service_started
+    environment:
+      - PORT=5000
+      - NODE_ENV=production
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/edugrade
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OCR_SERVICE_URL=http://ocr_service:8001
+      - CLIENT_ORIGIN=http://localhost:3000
+      - UPLOAD_DIR=./uploads
+      - PGSSL=false
+    volumes:
+      - uploads_data:/app/uploads
+
+  # ---- Client -------------------------------------------------------------
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: edugrade-client
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
+
+volumes:
+  postgres_data:
+  uploads_data:
